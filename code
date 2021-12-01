@@ -1,0 +1,202 @@
+```{r}
+#if (!requireNamespace("BiocManager", quietly = TRUE))
+#install.packages("BiocManager")
+#BiocManager::install("dada2")
+```
+```{r}
+library(dada2)
+```
+```{r}
+packageVersion("dada2")
+```
+```{r}
+setwd("~/Desktop/Sequences/FASTA/")
+```
+```{r}
+path <- "~/Desktop/Sequences/FASTA/" 
+list.files(path)
+```
+```{r}
+fnFs <- sort(list.files(path, pattern="_R1_001.fastq", full.names = TRUE))
+fnRs <- sort(list.files(path, pattern="_R2_001.fastq", full.names = TRUE))
+sample.names <- sapply(strsplit(basename(fnFs), "_"), `[`, 1)
+```
+```{r}
+plotQualityProfile(fnFs[1:2])
+```
+```{r}
+plotQualityProfile(fnRs[1:2])
+```
+```{r}
+filtFs <- file.path(path, "filtered", paste0(sample.names, "_F_filt.fastq.gz"))
+filtRs <- file.path(path, "filtered", paste0(sample.names, "_R_filt.fastq.gz"))
+names(filtFs) <- sample.names
+names(filtRs) <- sample.names
+```
+```{r}
+out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncLen=c(290,210),maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,compress=TRUE, multithread=TRUE)
+head(out)
+```
+```{r}
+errF <- learnErrors(filtFs, multithread=TRUE)
+```
+```{r}
+errR <- learnErrors(filtRs, multithread=TRUE)
+```
+```{r}
+saveRDS(errF, file = "errF")
+```
+```{r}
+saveRDS(errR, file="errR")
+```
+```{r}
+plotErrors(errF, nominalQ=TRUE)
+```
+```{r}
+dadaFs <- dada(filtFs, err=errF, multithread=TRUE)
+```
+```{r}
+dadaRs <- dada(filtRs, err=errR, multithread=TRUE)
+```
+```{r}
+dadaFs[[1]]
+```
+```{r}
+mergers <- mergePairs(dadaFs, filtFs, dadaRs, filtRs, verbose=TRUE)
+head(mergers[[1]])
+```
+```{r}
+seqtab <- makeSequenceTable(mergers)
+dim(seqtab)
+```
+```{r}
+table(nchar(getSequences(seqtab)))
+```
+```{r}
+seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
+dim(seqtab.nochim)
+```
+```{r}
+sum(seqtab.nochim)/sum(seqtab)
+```
+```{r}
+getN <- function(x) sum(getUniques(x))
+track <- cbind(out, sapply(dadaFs, getN), sapply(dadaRs, getN), sapply(mergers, getN), rowSums(seqtab.nochim))
+colnames(track) <- c("input", "filtered", "denoisedF", "denoisedR", "merged", "nonchim")
+rownames(track) <- sample.names
+head(track)
+```
+```{r}
+save(seqtab.nochim, file ="seqtab.nochim.Rdata")
+```
+```{r}
+taxa <- assignTaxonomy(seqtab.nochim, "~/Desktop/Sequences/FASTA/silva_nr99_v138.1_train_set.fa", multithread=TRUE)
+```
+```{r}
+#this saves it and then you can load it!!!!
+save(taxa,file = "A3taxa.Rdata")
+```
+```{r}
+library(phyloseq)
+```
+```{r}
+library(Biostrings)
+```
+```{r}
+library(ggplot2)
+```
+```{r}
+samples.out <- rownames(seqtab.nochim)
+```
+```{r}
+samdf <- data.frame(samples.out)
+```
+```{r}
+rownames(samdf) <- samples.out
+```
+```{r}
+ps <- phyloseq(otu_table(seqtab.nochim, taxa_are_rows=FALSE), 
+               sample_data(samdf), 
+               tax_table(taxa))
+ps <- prune_samples(sample_names(ps), ps)
+```
+```{r}
+dna <- Biostrings::DNAStringSet(taxa_names(ps))
+names(dna) <- taxa_names(ps)
+ps <- merge_phyloseq(ps, dna)
+taxa_names(ps) <- paste0("ASV", seq(ntaxa(ps)))
+ps
+```
+```{r}
+rank_names(ps)
+```
+```{r}
+table(tax_table(ps)[, "Phylum"], exclude = NULL)
+```
+```{r}
+saveRDS(ps, "ps.rds")
+```
+```{r}
+ps_phylum <- tax_glom(ps, "Phylum")
+```
+```{r}
+ps1_phylum_relabun <- transform_sample_counts(ps_phylum, function(ASV) ASV/sum(ASV))
+```
+```{r}
+taxa_abundance_table_phylum <- psmelt(ps1_phylum_relabun)
+```
+```{r}
+taxa_abundance_table_phylum$Phylum<-factor(taxa_abundance_table_phylum$Phylum)
+```
+```{r}
+#require(scales)
+```
+```{r}
+library(RColorBrewer)
+```
+```{r}
+ggplot(data=taxa_abundance_table_phylum,mapping=aes(x=Sample,y=Abundance,))+geom_bar(position="stack", stat="identity")+aes(colour=Phylum)
+```
+```{r}
+GraphPhylum<-ggplot(data=taxa_abundance_table_phylum,mapping=aes(x=Sample,y=Abundance,))+geom_bar(position="stack", stat="identity")+aes(colour=Phylum,fill=Phylum)
+```
+```{r}
+GraphPhylum+ggtitle("The Relative Abundance of Phyla from Three Pumice Samples and Negative Control")
+```
+```{r}
+table(tax_table(ps)[, "Order"], exclude = NULL)
+```
+```{r}
+ps_order <- tax_glom(ps, "Order")
+```
+```{r}
+ps1_order_relabun <- transform_sample_counts(ps_order, function(ASV) ASV/sum(ASV))
+```
+```{r}
+taxa_abundance_table_order <- psmelt(ps1_order_relabun)
+```
+```{r}
+taxa_abundance_table_order$Order<-factor(taxa_abundance_table_order$Order)
+```
+```{r}
+ggplot(data=taxa_abundance_table_order,mapping=aes(x=Sample,y=Abundance,))+geom_bar(position="stack", stat="identity")
+```
+```{r}
+GraphOrder<-ggplot(data=taxa_abundance_table_order,mapping=aes(x=Sample,y=Abundance,))+geom_bar(position="stack",stat="identity")
+```
+```{r}
+GraphOrder
+```
+```{r}
+GraphOrder+ggtitle("The Relative Abundance of Orders from Three Pumice Samples and Negative Control")+aes(colour=Order,fill=Order)
+```
+```{r}
+ggplot(data=taxa_abundance_table_phylum,mapping=aes(x=Sample,y=Phylum ))+geom_point(scales="free_x")+(aes(size = Abundance,colour=Phylum))+ggtitle("The Relative Abundance of Phyla from Three Pumice Samples and Negative Control")+scale_size_area()
+```
+```{r}
+ggsave("test.pdf",plot = last_plot())
+```
+
+``{r}
+library(tidyverse)
+```
